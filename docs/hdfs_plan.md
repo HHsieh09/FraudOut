@@ -12,3 +12,10 @@
 
 ### For Deequ's data quality check
 /data/fraudout/curated/dq_results/yyyy=YYYY/mm=MM/dd=DD/hour=HH/*.parquet
+
+### Usage
+`hdfs df -mkdir -p /data/fraudout/raw`
+`hdfs df -mkdir -p /data/fraudout/curated/tx_curated`
+`hdfs df -mkdir -p /data/fraudout/curated/tx_features`
+`hdfs df -mkdir -p /data/fraudout/curated/tx_scores`
+`hdfs df -mkdir -p /data/fraudout/curated/dq_results`
