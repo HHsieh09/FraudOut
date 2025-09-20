@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  namenode: # master node for HDFS
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    ports:
+      - "9870:9870"
+    environment:
+      - CLUSTER_NAME=fraudout
+    volumes:
+      - namenode_data:/hadoop/dfs/name # Persists namenode metadata
+    networks:
+      - fraudout_network
+  
+  datanode: # stores actual blocks of files in HDFS
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    environment:
+      - CLUSTER_NAME=fraudout # Must match namenode's CLUSTER_NAME
+    volumes:
+      - datanode_data:/hadoop/dfs/data
+    networks:
+      - fraudout_network
+
+  zookeeper:
+    image: bitnami/zookeeper:3
+    container_name: zookeeper
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+    ports:
+      - "2181:2181"
+    networks:
+      - fraudout_network
+
+  kafka:
+    image: bitnami/kafka:3
+    container_name: kafka
+    ports:
+      - "9094:9094" # host connection
+    environment:
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181 # connects to zookeeper service
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:9094 # internal and external listeners
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094 # advertised to clients
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT # protocol mapping
+      ALLOW_PLAINTEXT_LISTENER: "yes" # allows non-SSL connections
+    depends_on:
+      - zookeeper
+    networks:
+      - fraudout_network
+
+  spark:
+    image: bitnami/spark:3
+    container_name: spark
+    ports:
+      - "8080:8080"
+    networks:
+      - fraudout_network
+
+networks:
+  fraudout_network:
+
+volumes:
+  namenode_data:
+  datanode_data:
