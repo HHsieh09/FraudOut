@@ -10,7 +10,8 @@ requires-python = ">=3.12"
 dependencies = [
     "dotenv (>=0.9.9,<0.10.0)",
     "requests (>=2.32.5,<3.0.0)",
-    "datetime (>=5.5,<6.0)"
+    "datetime (>=5.5,<6.0)",
+    "kafka-python (>=2.2.15,<3.0.0)"
 ]
 
 

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from kafka import KafkaProducer
 from collections import deque
 from dotenv import load_dotenv
 import os, requests, time, random, json, uuid
@@ -14,6 +15,25 @@ TXN_POST_PATH = os.getenv("TXN_POST_PATH")
 CARD_TOKEN = os.getenv("MARQETA_CARD_TOKEN")
 MEAN_INTERVAL = float(os.getenv("SIM_INTERVAL_SEC", 5))
 CURRENCY = os.getenv("CURRENCY", "USD")
+
+
+# Kafka configuration
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+KAFKA_TOPICS = os.getenv("KAFKA_TOPICS")
+
+# Kafka Message Producer. It sends data (messages) to a Kafka message queue service. 
+# This is usually the first link in a large data processing system, responsible for sending data from the source (e.g., transaction simulator) into the processing pipeline.
+producer = KafkaProducer(
+    bootstrap_servers = KAFKA_BOOTSTRAP_SERVERS,
+    value_serializer = lambda v: json.dumps(v).encode('utf-8'),
+    key_serializer = lambda k: json.dumps(k).encode('utf-8'),
+    linger_ms = 10, # wait up to 10ms before sending batch
+    acks = -1, # wait for all replicas to acknowledge. This ensures data durability. 
+    # acks = 0, # fire and forget. This is faster but risks data loss.
+    # acks = 1, # wait for leader to acknowledge. This is a balance
+    # acks = -1, # same as "all". This is the strongest guarantee. Suitable for critical data.
+    retries = 5 # retry up to 5 times on failure
+)
 
 # Ensure all required environment variables are set
 if not all([BASE, KEY, SECRET, TXN_POST_PATH, CARD_TOKEN]):
@@ -308,7 +328,17 @@ def post_transaction(session, payload: dict) -> dict:
     }
     response = session.post(url, auth=(KEY, SECRET), headers=headers, data=json.dumps(payload))
     if response.status_code == 200 or response.status_code == 201:
-        return response.json()
+        response_json = response.json()
+        txn_key = response_json.get("transaction",{}).get("token","")
+        # Send the transaction data to Kafka topic(s)
+        try:
+            producer.send(KAFKA_TOPICS, key=txn_key, value=response_json) # asynchronous
+            producer.flush(timeout=2.0) # ensure all messages are sent within 2 seconds
+            print(f"Sent transaction to Kafka topic(s) {KAFKA_TOPICS}")
+        except Exception as e:
+            print(f"Error sending to Kafka: {e}")
+
+        return response_json
     else:
         print(f"Error posting transaction: {response.status_code} - {response.text}")
         return None

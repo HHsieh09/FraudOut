@@ -147,6 +147,26 @@ files = [
 all = ["flake8 (>=7.1.1)", "mypy (>=1.11.2)", "pytest (>=8.3.2)", "ruff (>=0.6.2)"]
 
 [[package]]
+name = "kafka-python"
+version = "2.2.15"
+description = "Pure Python client for Apache Kafka"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "kafka_python-2.2.15-py2.py3-none-any.whl", hash = "sha256:84c0993cd4f7f2f01e92d8104ea9bdf631aff72fc5e6ea62eb3bdf1d56528fc3"},
+    {file = "kafka_python-2.2.15.tar.gz", hash = "sha256:e0f480a45f3814cb0eb705b8b4f61069e1be61dae0d8c69d0f1f2da33eea1bd5"},
+]
+
+[package.extras]
+benchmarks = ["pyperf"]
+crc32c = ["crc32c"]
+lz4 = ["lz4"]
+snappy = ["python-snappy"]
+testing = ["mock ; python_version < \"3.3\"", "pytest", "pytest-mock", "pytest-timeout"]
+zstd = ["zstandard"]
+
+[[package]]
 name = "python-dotenv"
 version = "1.1.1"
 description = "Read key-value pairs from a .env file and set them as environment variables"
@@ -286,4 +306,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "a338f330f274f16bb46ac73d6eadd5388e37c71241bae02c3c81a22b289840dc"
+content-hash = "91cca4455b92e23bb05fa42695ee760110e05b79f6b8e5e41b630d425ae177c9"
