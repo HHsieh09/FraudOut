@@ -5,9 +5,13 @@ services:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: namenode
     ports:
-      - "9870:9870"
+      - "9870:9870" # HDFS web UI
+      - "8020:8020" # HDFS client port
     environment:
       - CLUSTER_NAME=fraudout
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020 # HDFS URI. Clients use this to connect to HDFS
+      - HDFS_CONF_dfs_namenode_name_dir=file:///hadoop/dfs/name # Namenode storage directory. Mapped to a volume for persistence
+      - HDFS_CONF_dfs_replication=1 # Replication factor. Set to 1 for single node setup
     volumes:
       - namenode_data:/hadoop/dfs/name # Persists namenode metadata
     networks:
@@ -18,8 +22,14 @@ services:
     container_name: datanode
     environment:
       - CLUSTER_NAME=fraudout # Must match namenode's CLUSTER_NAME
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020 # HDFS URI. Clients use this to connect to HDFS
+      - HDFS_CONF_dfs_datanode_data_dir=file:///hadoop/dfs/data # Datanode storage directory. Mapped to a volume for persistence
+      - HDFS_CONF_dfs_replication=1 # Replication factor. Set to 1 for single node setup
+      - SERVICE_PRECONDITION=namenode:9870 # Ensures datanode starts after namenode is ready
     volumes:
       - datanode_data:/hadoop/dfs/data
+    depends_on:
+      - namenode
     networks:
       - fraudout_network
 
