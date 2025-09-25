@@ -71,6 +71,7 @@ services:
     networks:
       - fraudout_network
 
+# Originally only using Spark, but to connect to Power BI, adding the following is needed
   metastore-db:
     image: postgres:13
     container_name: metastore-db
@@ -82,8 +83,8 @@ services:
       - "5432:5432"
     networks:
       - fraudout_network
-    # volumes:
-    #  - metastore_data:/var/lib/postgresql/data
+    volumes:
+      - metastore_data:/var/lib/postgresql/data
 
   # Schema initialization service
 
@@ -145,4 +146,4 @@ networks:
 volumes:
   namenode_data:
   datanode_data:
-  # metastore_data:
+  metastore_data:

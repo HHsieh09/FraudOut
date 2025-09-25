@@ -24,7 +24,7 @@ subgraph HadoopStore["Hadoop Storage & Catalog"]
 end
 
 subgraph Serving["Serving"]
-    D2 --> E1[(Serving DB Postgres or Redshift)]
+    D2 --> E1[(Serving DB Postgres)]
     D3 --> E2[Self-service Query View]
 end
 
