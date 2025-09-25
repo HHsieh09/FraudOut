@@ -8,7 +8,7 @@ KAFKA_BOOTSTRAP_SERVERS = "kafka:9092"
 KAFKA_TOPICS = "fraudout.txn.raw"
 
 # Define HDFS paths
-RAW_PATH = "hdfs://namenode:8020/user/spark/fraudout/raw/"
+RAW_PATH = "hdfs://namenode:8020/user/spark/fraudout/raw"
 CURATED_PATH = "hdfs://namenode:8020/user/spark/fraudout/curated/tx_curated"
 FEATURES_PATH = "hdfs://namenode:8020/user/spark/fraudout/curated/tx_features"
 SCORES_PATH = "hdfs://namenode:8020/user/spark/fraudout/curated/tx_scores"
