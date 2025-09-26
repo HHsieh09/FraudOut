@@ -16,7 +16,6 @@ CARD_TOKEN = os.getenv("MARQETA_CARD_TOKEN")
 MEAN_INTERVAL = float(os.getenv("SIM_INTERVAL_SEC", 5))
 CURRENCY = os.getenv("CURRENCY", "USD")
 
-
 # Kafka configuration
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 KAFKA_TOPICS = os.getenv("KAFKA_TOPICS")
@@ -197,14 +196,16 @@ COUNTRIES_CODES = [
 
 # Sample channels for transaction simulation
 CHANNELS = [
-    "ecomm", # e-commerce
-    "pos", # point of sale
-    "moto", # mail order / telephone order
-    "atm", # automated teller machine
-    "ivr", # interactive voice response
-    "other", # other
-    "inapp" # in-app
+    "ECOMM", # e-commerce
+    "POS", # point of sale
+    "MOTO", # mail order / telephone order
+    "ATM", # automated teller machine
+    "IVR", # interactive voice response
+    "OTHER", # other
+    "INAPP" # in-app
     ]
+
+SYNTHETIC_CARD_POOL = [f"SYNTH_CARD_{i:04d}" for i in range(10)]
 
 # Function to get the current time in ISO 8601 format with timezone info. For example: '2023-10-05T14:48:00+00:00'.
 def generate_present_iso():
@@ -245,7 +246,7 @@ def assign_true_fraud(txn, last_txn=None, recent_same_card_count: int = 1) -> di
     base_fraud_prob = 0.02
 
     try:
-        mcc = str(txn['event_metadata']['merchant']['mcc'])
+        mcc = str(txn['card_acceptor']['mcc'])
     except Exception:
         mcc = ""
 
@@ -255,8 +256,8 @@ def assign_true_fraud(txn, last_txn=None, recent_same_card_count: int = 1) -> di
 
     # Cross-border transaction
     if last_txn:
-        last_tx_country = last_txn.get('event_metadata', {}).get('country')
-        curr_tx_country = txn.get('event_metadata', {}).get('country')
+        last_tx_country = last_txn.get('event_metadata', {}).get('country_code')
+        curr_tx_country = txn.get('event_metadata', {}).get('country_code')
         if last_tx_country and curr_tx_country and last_tx_country != curr_tx_country:
             base_fraud_prob += 0.15
 
@@ -264,7 +265,7 @@ def assign_true_fraud(txn, last_txn=None, recent_same_card_count: int = 1) -> di
     try:
         tx_time = datetime.fromisoformat(txn['user_transaction_time'])
         if tx_time.hour >= 23 or tx_time.hour < 6:
-            base_fraud_prob += 0.05
+            base_fraud_prob += 0.10
     except Exception:
         pass
 
@@ -298,27 +299,47 @@ def build_payload():
     tx_lat, tx_lon = generate_geolocation()
     tx_country = random.choice(COUNTRIES_CODES)
     tx_channel = random.choice(CHANNELS)
+    tx_synthetic_card_id = random.choice(SYNTHETIC_CARD_POOL)
 
     payload = {
         "type": "authorization",
         "card_token": CARD_TOKEN,
-        "card_acceptor": { "mid": "123456890" },
         "network": "VISA",
         "amount": tx_amount,
         "currency": CURRENCY,
         "user_transaction_time": tx_time,
-        "event_metadata": {
-            "network": "visa",
-            "merchant": tx_merchant,
-            "country": tx_country,
-            "channel": tx_channel,
+        "card_acceptor": {
+            "mid": tx_merchant["mid"],
+            "mcc": tx_merchant["mcc"],
+        },
+        "transaction_metadata":  {
+            "payment_channel": tx_channel
+        }, 
+        "event_metadata": { # Later enrich and send to Kafka
             "device_id": str(uuid.uuid4()),
+            "synthetic_card_id": tx_synthetic_card_id,
+            "country_code": tx_country,
+            "payment_channel": tx_channel,
             "lat": tx_lat,
             "lon": tx_lon
         }
     }
 
     return payload
+
+def enrich_kafka_data(response_json: dict, original_payload: dict) -> dict:
+    event_metadata = original_payload.get("event_metadata",{})
+    response_json["event_metadata"] = {
+            "device_id": event_metadata.get("device_id"),
+            "synthetic_card_id": event_metadata.get("synthetic_card_id"),
+            "country_code": event_metadata.get("country_code"),
+            "payment_channel": event_metadata.get("payment_channel"),
+            "lat": event_metadata.get("lat"),
+            "lon": event_metadata.get("lon"),
+            "truth_fraud": event_metadata.get("truth_fraud"), 
+            "truth_score_prob": event_metadata.get("truth_score_prob")
+    }
+    return response_json
 
 # Post the transaction to Marqeta API
 def post_transaction(session, payload: dict) -> dict:
@@ -330,6 +351,7 @@ def post_transaction(session, payload: dict) -> dict:
     if response.status_code == 200 or response.status_code == 201:
         response_json = response.json()
         txn_key = response_json.get("transaction",{}).get("token","")
+        response_json = enrich_kafka_data(response_json, payload)
         # Send the transaction data to Kafka topic(s)
         try:
             producer.send(KAFKA_TOPICS, key=txn_key, value=response_json) # asynchronous
@@ -381,7 +403,7 @@ def main():
         while True:
             try:
                 payload = build_payload()
-                count_in_window = track_recent_counts(payload.get('card_token'), payload['user_transaction_time'])
+                count_in_window = track_recent_counts(payload.get("event_metadata", {}).get("synthetic_card_id"), payload['user_transaction_time'])
                 payload = assign_true_fraud(payload, last_txn, recent_same_card_count=count_in_window)
                 response = post_transaction(session, payload)
                 if response:

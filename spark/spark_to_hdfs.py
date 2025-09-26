@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import current_timestamp, get_json_object, col, date_format, from_json,  window, count, sum as _sum, lit, when, to_timestamp
+from pyspark.sql.functions import current_timestamp, get_json_object, col, date_format, from_json, window, count, sum as _sum, lit, when, to_timestamp, coalesce
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
 import os
 
@@ -34,11 +34,12 @@ spark.sparkContext.setLogLevel("WARN")
 txn_schema = StructType([
     StructField("type", StringType()),
     StructField("token", StringType()),
-    StructField("amount", DoubleType()),          # 若原始 JSON 有時是字串，改成 StringType 再 cast
+    StructField("amount", DoubleType()), # Marqeta returns amount as string, cast later with validation
     StructField("network", StringType()),
     StructField("created_time", StringType()),
     StructField("user_transaction_time", StringType()),
     StructField("currency_code", StringType()),
+    StructField("state", StringType())
 ])
 
 # Read from Kafka topic
@@ -78,10 +79,32 @@ raw_query = raw_df.writeStream \
 # withColumn("txn", from_json(...)) creates a new column "txn" by parsing the JSON string
 # select("event_key","event_json","kafka_ts", "ingestion_ts", "txn.*") selects the original columns and flattens the "txn" struct into individual columns
 curated_df = raw_df.withColumn("txn", from_json(col("event_json"), txn_schema)) \
-    .select("event_key","event_json","kafka_ts", "ingestion_ts", "dt", "txn.*",
-        get_json_object("event_json", "$.card_acceptor.name").alias("merchant"),
-        get_json_object("event_json", "$.card_acceptor.country_code").alias("country"),
-        get_json_object("event_json", "$.transaction_metadata.payment_channel").alias("channel"))
+    .select("event_key","event_json","kafka_ts", "ingestion_ts", "dt",
+    # Extract nested transaction fields
+    get_json_object("event_json", "$.transaction.type").alias("type"),
+    get_json_object("event_json", "$.transaction.token").alias("token"),
+    get_json_object("event_json", "$.transaction.amount").cast("double").alias("amount"),
+    get_json_object("event_json", "$.transaction.network").alias("network"),
+    get_json_object("event_json", "$.transaction.created_time").alias("created_time"),
+    get_json_object("event_json", "$.transaction.user_transaction_time").alias("user_transaction_time"),
+    get_json_object("event_json", "$.transaction.currency_code").alias("currency_code"),
+    get_json_object("event_json", "$.transaction.state").alias("state"),
+    get_json_object("event_json", "$.transaction.user_token").alias("user_token"),
+    get_json_object("event_json", "$.transaction.card_token").alias("card_token"),
+    # Extract card_acceptor fields
+    get_json_object("event_json", "$.transaction.card_acceptor.mcc").alias("mcc"),
+    get_json_object("event_json", "$.transaction.card_acceptor.mid").alias("mid"),
+    # Extract transaction_metadata fields
+    get_json_object("event_json", "$.event_metadata.device_id").alias("device_id"),
+    get_json_object("event_json", "$.event_metadata.synthetic_card_id").alias("synthetic_card_id"),
+    get_json_object("event_json", "$.event_metadata.country_code").alias("country"),
+    get_json_object("event_json", "$.event_metadata.payment_channel").alias("payment_channel"),
+    get_json_object("event_json", "$.event_metadata.lat").cast("double").alias("lat"),
+    get_json_object("event_json", "$.event_metadata.lon").cast("double").alias("lon"),
+    # Extract fraud fields
+    get_json_object("event_json", "$.event_metadata.truth_fraud").cast("int").alias("truth_fraud"),
+    get_json_object("event_json", "$.event_metadata.truth_score_prob").cast("double").alias("truth_score_prob")
+    )
 
 # Write the curated data to HDFS in Parquet format
 curated_query = curated_df.writeStream \
@@ -93,7 +116,8 @@ curated_query = curated_df.writeStream \
     .start()
 
 # Sink 3: feature engineered data to HDFS
-features_base = curated_df\
+features_base = curated_df \
+    .withColumn("entity_id", coalesce(col("synthetic_card_id"), col("card_token"), col("device_id"))) \
     .withColumn("amount_double", col("amount").cast("double")) \
     .withColumn("event_ts", to_timestamp(col("user_transaction_time")))
 
@@ -104,9 +128,10 @@ features_base = curated_df\
 # groupBy(col("token"), window(col("event_ts", "5 minutes"))) groups the data by token and 5-minute window
 # agg(count("*").alias("txn_count_5min"), _sum("amount_double").alias("txn_amount_5min")) computes the count and sum of transactions in each group
 # withColumn("dt", date_format(col("window.end"), "yyyy-MM-dd")) creates a date column for partitioning the output data. The date is based on the end of the window
-features_df = features_base.withWatermark("event_ts","10 minutes") \
+features_df = features_base \
+    .withWatermark("event_ts", "10 minutes") \
     .groupBy(
-        col("token"),
+        col("entity_id"),
         window(col("event_ts"), "5 minutes")
     ).agg(
         count("*").alias("txn_count_5min"),
@@ -127,9 +152,21 @@ feature_query = features_df.writeStream \
 # Simple scoring logic: if amount > 1000, score = 1 (fraud), else score = 0 (not fraud)
 # withColumn("score", ...) creates a new column "score" based on the amount
 # withColumn("decision", ...) creates a new column "decision" based on the amount
-scores_df = curated_df.withColumn("score", (col("amount").cast(DoubleType()) > 1000).cast("int")) \
-    .withColumn("decision", when(col("amount").cast("double") > 1000, lit("REVIEW")).otherwise(lit("OK"))) \
-    .withColumn("dt", date_format(col("ingestion_ts"), "yyyy-MM-dd"))
+THRESHOLD = 0.5
+
+scores_df = curated_df \
+    .withColumn("predicted_fraud", (col("truth_score_prob") >= lit(THRESHOLD)).cast("int")) \
+    .withColumn("decision", when(col("predicted_fraud") == 1, lit("REVIEW")).otherwise(lit("OK"))) \
+    .select(
+        "event_key",
+        "token",
+        col("amount").cast("double").alias("amount"),
+        col("truth_fraud").cast("int").alias("truth_fraud"),
+        col("truth_score_prob").cast("double").alias("truth_score_prob"),
+        "predicted_fraud",
+        "decision",
+        "dt"
+    )
 
 # Write the scores data to HDFS in Parquet format
 scores_query = scores_df.writeStream \
@@ -145,7 +182,7 @@ dq_df = curated_df.select(
     col("token").isNotNull().alias("token_not_null"),
     (col("amount").cast(DoubleType()) > 0).alias("amount_positive"),
     current_timestamp().alias("dq_run_ts"),
-    date_format(col("ingestion_ts"), "yyyy-MM-dd").alias("dt")
+    "dt"
 )
 
 # Write the data quality results to HDFS in Parquet format
