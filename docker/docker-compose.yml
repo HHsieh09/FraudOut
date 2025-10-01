@@ -58,6 +58,11 @@ services:
       KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094 # advertised to clients
       KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT # protocol mapping
       ALLOW_PLAINTEXT_LISTENER: "yes" # allows non-SSL connections
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
     depends_on:
       - zookeeper
     networks:
@@ -136,6 +141,116 @@ services:
       - hive-metastore
     ports:
       - "10000:10000" # HiveServer2 Thrift service
+    networks:
+      - fraudout_network
+
+  simulator-1:
+    image: simulator
+    container_name: simulator-1
+    environment:
+      PRODUCER_ID: 1
+    command: poetry run python ingest/marqeta_simulator.py --bootstrap-server kafka:9092 --topic fraudout.txn.raw
+    depends_on:
+      - kafka
+    networks:
+      - fraudout_network
+
+  simulator-2:
+    image: simulator
+    container_name: simulator-2
+    environment:
+      PRODUCER_ID: 2
+    command: poetry run python ingest/marqeta_simulator.py --bootstrap-server kafka:9092 --topic fraudout.txn.raw
+    depends_on:
+      - kafka
+    networks:
+      - fraudout_network
+
+  simulator-3:
+    image: simulator
+    container_name: simulator-3
+    environment:
+      PRODUCER_ID: 3
+    command: poetry run python ingest/marqeta_simulator.py --bootstrap-server kafka:9092 --topic fraudout.txn.raw
+    depends_on:
+      - kafka
+    networks:
+      - fraudout_network
+
+  simulator-4:
+    image: simulator
+    container_name: simulator-4
+    environment:
+      PRODUCER_ID: 4
+    command: poetry run python ingest/marqeta_simulator.py --bootstrap-server kafka:9092 --topic fraudout.txn.raw
+    depends_on:
+      - kafka
+    networks:
+      - fraudout_network
+
+  simulator-5:
+    image: simulator
+    container_name: simulator-5
+    environment:
+      PRODUCER_ID: 5
+    command: poetry run python ingest/marqeta_simulator.py --bootstrap-server kafka:9092 --topic fraudout.txn.raw
+    depends_on:
+      - kafka
+    networks:
+      - fraudout_network
+
+  simulator-6:
+    image: simulator
+    container_name: simulator-6
+    environment:
+      PRODUCER_ID: 6
+    command: poetry run python ingest/marqeta_simulator.py --bootstrap-server kafka:9092 --topic fraudout.txn.raw
+    depends_on:
+      - kafka
+    networks:
+      - fraudout_network
+
+  simulator-7:
+    image: simulator
+    container_name: simulator-7
+    environment:
+      PRODUCER_ID: 7
+    command: poetry run python ingest/marqeta_simulator.py --bootstrap-server kafka:9092 --topic fraudout.txn.raw
+    depends_on:
+      - kafka
+    networks:
+      - fraudout_network
+
+  simulator-8:
+    image: simulator
+    container_name: simulator-8
+    environment:
+      PRODUCER_ID: 8
+    command: poetry run python ingest/marqeta_simulator.py --bootstrap-server kafka:9092 --topic fraudout.txn.raw
+    depends_on:
+      - kafka
+    networks:
+      - fraudout_network
+
+  simulator-9:
+    image: simulator
+    container_name: simulator-9
+    environment:
+      PRODUCER_ID: 9
+    command: poetry run python ingest/marqeta_simulator.py --bootstrap-server kafka:9092 --topic fraudout.txn.raw
+    depends_on:
+      - kafka
+    networks:
+      - fraudout_network
+
+  simulator-10:
+    image: simulator
+    container_name: simulator-10
+    environment:
+      PRODUCER_ID: 10
+    command: poetry run python ingest/marqeta_simulator.py --bootstrap-server kafka:9092 --topic fraudout.txn.raw
+    depends_on:
+      - kafka
     networks:
       - fraudout_network
 

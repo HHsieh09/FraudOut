@@ -20,6 +20,8 @@ CURRENCY = os.getenv("CURRENCY", "USD")
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 KAFKA_TOPICS = os.getenv("KAFKA_TOPICS")
 
+PRODUCER_ID = os.getenv("PRODUCER_ID", "default")
+
 # Kafka Message Producer. It sends data (messages) to a Kafka message queue service. 
 # This is usually the first link in a large data processing system, responsible for sending data from the source (e.g., transaction simulator) into the processing pipeline.
 producer = KafkaProducer(
@@ -321,7 +323,8 @@ def build_payload():
             "country_code": tx_country,
             "payment_channel": tx_channel,
             "lat": tx_lat,
-            "lon": tx_lon
+            "lon": tx_lon,
+            "producer_id": PRODUCER_ID
         }
     }
 
@@ -337,7 +340,8 @@ def enrich_kafka_data(response_json: dict, original_payload: dict) -> dict:
             "lat": event_metadata.get("lat"),
             "lon": event_metadata.get("lon"),
             "truth_fraud": event_metadata.get("truth_fraud"), 
-            "truth_score_prob": event_metadata.get("truth_score_prob")
+            "truth_score_prob": event_metadata.get("truth_score_prob"),
+            "producer_id": event_metadata.get("producer_id")
     }
     return response_json
 

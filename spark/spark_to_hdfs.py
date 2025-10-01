@@ -1,6 +1,9 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import current_timestamp, get_json_object, col, date_format, from_json, window, count, sum as _sum, lit, when, to_timestamp, coalesce
+from pyspark.sql.functions import current_timestamp, get_json_object, col, date_format, from_json, window, count, avg, sum as _sum, lit, when, to_timestamp, coalesce, unix_timestamp
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
+import threading
+import json
+import time
 import os
 
 # Define Kafka parameters
@@ -13,6 +16,7 @@ CURATED_PATH = "hdfs://namenode:8020/user/spark/fraudout/curated/tx_curated"
 FEATURES_PATH = "hdfs://namenode:8020/user/spark/fraudout/curated/tx_features"
 SCORES_PATH = "hdfs://namenode:8020/user/spark/fraudout/curated/tx_scores"
 DQ_PATH = "hdfs://namenode:8020/user/spark/fraudout/curated/dq_results"
+METRICS_PATH = "hdfs://namenode:8020/user/spark/fraudout/metrics"
 
 # Define checkpoint paths
 CHECKPOINT_DIR = "hdfs://namenode:8020/user/spark/fraudout/checkpoints"
@@ -72,6 +76,8 @@ raw_query = raw_df.writeStream \
     .option("checkpointLocation", f"{CHECKPOINT_DIR}/raw") \
     .partitionBy("dt") \
     .outputMode("append") \
+    .trigger(processingTime="10 seconds") \
+    .queryName("raw_json_sink") \
     .start()
 
 # Sink 2: curated parquet data to HDFS
@@ -113,6 +119,8 @@ curated_query = curated_df.writeStream \
     .option("checkpointLocation", f"{CHECKPOINT_DIR}/curated") \
     .partitionBy("dt") \
     .outputMode("append") \
+    .trigger(processingTime="10 seconds") \
+    .queryName("curated_data_sink") \
     .start()
 
 # Sink 3: feature engineered data to HDFS
@@ -146,6 +154,8 @@ feature_query = features_df.writeStream \
     .option("checkpointLocation", f"{CHECKPOINT_DIR}/features") \
     .partitionBy("dt") \
     .outputMode("append") \
+    .trigger(processingTime="10 seconds") \
+    .queryName("features_data_sink") \
     .start()
 
 # Sink 4: scores data to HDFS
@@ -175,6 +185,8 @@ scores_query = scores_df.writeStream \
     .option("checkpointLocation", f"{CHECKPOINT_DIR}/scores") \
     .partitionBy("dt") \
     .outputMode("append") \
+    .trigger(processingTime="10 seconds") \
+    .queryName("scores_data_sink") \
     .start()
 
 # Sink 5: data quality results to HDFS
@@ -192,6 +204,32 @@ dq_query = dq_df.writeStream \
     .option("checkpointLocation", f"{CHECKPOINT_DIR}/dq") \
     .partitionBy("dt") \
     .outputMode("append") \
+    .trigger(processingTime="10 seconds") \
+    .queryName("data_quality_sink") \
+    .start()
+
+# Sink 6: Spark Streaming processing time records to HDFS
+metrics_base = curated_df.select("ingestion_ts","user_transaction_time") \
+    .withColumn("event_ts", to_timestamp(col("user_transaction_time"))) \
+    .withColumn("latency_sec", (unix_timestamp(col("ingestion_ts")) - unix_timestamp(col("event_ts"))).cast("double"))
+
+metrics_df = metrics_base.withWatermark("event_ts","10 minutes") \
+    .groupBy(window(col("ingestion_ts"), "1 minutes").alias("windows")) \
+    .agg(count("*").alias("rows"), avg("latency_sec").alias("avg_latency_sec")) \
+    .select(col("windows.start").cast("timestamp").alias("window_start"),
+        col("windows.end").cast("timestamp").alias("window_end"),
+        col("rows"),
+        col("avg_latency_sec"),
+        date_format(col("windows.start"), "yyyy-MM-dd").alias("dt"))
+
+mt_query = metrics_df.writeStream \
+    .format("console") \
+    .option("path", METRICS_PATH) \
+    .option("checkpointLocation", f"{CHECKPOINT_DIR}/metrics") \
+    .partitionBy("dt") \
+    .outputMode("complete") \
+    .trigger(processingTime="10 seconds") \
+    .queryName("metrics_in_minute") \
     .start()
 
 """
@@ -228,5 +266,32 @@ query = txn_df.writeStream \
     .outputMode("append") \
     .start()
 """
+
+# Print the streaming throughput from Spark
+def print_streaming_process(interval_sec=10):
+    while True:
+        try:
+            active = spark.streams.active
+            if not active:
+                print("No active streams...")
+            for query in active:
+                loops = query.lastProgress
+                if loops:
+                    summary = {
+                        "name": query.name,
+                        "id": query.id,
+                        "timestamp": loops.get("timestamp"),
+                        "inputRowPerSecond": loops.get("inputRowsPerSecond"),
+                        "processedRowsPerSecond": loops.get("processedRowsPerSecond"),
+                        "numInputRows": loops.get("numInputRows"),
+                    }
+                    print("[STREAM-PROGRESS]", json.dumps(summary))
+        except Exception as e:
+            print(f"[STREAM-PROGRESS] error: {e}")
+        time.sleep(interval_sec)
+
+thread = threading.Thread(target=print_streaming_process, args=(10,), daemon=True)
+thread.start()
+
 # Await termination of all streams
 spark.streams.awaitAnyTermination()

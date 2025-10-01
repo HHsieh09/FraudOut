@@ -89,6 +89,17 @@ PARTITIONED BY (dt string)
 STORED AS PARQUET
 LOCATION 'hdfs://namenode:8020/user/spark/fraudout/curated/dq_results';
 
+-- 6) Spark Processing Metrics, partitioned by dt=YYYY-MM-DD
+CREATE EXTERNAL TABLE IF NOT EXISTS stream_metrics (
+  window_start timestamp,
+  window_end   timestamp,
+  rows         bigint,
+  avg_latency_sec double
+)
+PARTITIONED BY (dt string)
+STORED AS PARQUET
+LOCATION 'hdfs://namenode:8020/user/spark/fraudout/metrics';
+
 -- Scan for partitions
 -- MSCK = Metastore Check
 -- REPAIR TABLE adds any partitions found on HDFS that are not in the Hive metastore
@@ -97,3 +108,4 @@ MSCK REPAIR TABLE tx_curated;
 MSCK REPAIR TABLE tx_features;
 MSCK REPAIR TABLE tx_scores;
 MSCK REPAIR TABLE dq_results;
+MSCK REPAIR TABLE stream_metrics;
